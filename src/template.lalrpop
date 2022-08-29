@@ -1,0 +1,76 @@
+use crate::ast;
+use ast::{Expr, Opcode};
+
+use std::str::FromStr;
+
+grammar;
+
+pub Expr: Box<Expr> = {
+    Expr ExprOp  Term=> Box::new(Expr::Op(<>)),
+    Term,
+};
+
+pub Exprs = Comma<Expr>;
+pub Pairs = Comma<Pair>;
+
+Comma<T>: Vec<T> = {
+    <mut v:(<T> ",")*> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            v.push(e);
+            v
+        }
+    }
+};
+
+Pair: (Box<Expr>, Box<Expr>) = {
+  <e0:Expr> ":" <e1:Expr> => (e0, e1),
+}
+
+Array: Box<Expr> = {
+  "[" <e:Exprs> "]" => Box::new(Expr::Array(e)),
+}
+
+Map: Box<Expr> = {
+  "{" <p:Pairs> "}" => Box::new(Expr::Map(p)),
+}
+
+ParenExpr: Box<Expr> = {
+  "(" <e:Expr> ")" => e,
+}
+
+TermRef: Box<Expr> = {
+  <t:Term> "[" <e:Expr> "]" => Box::new(Expr::TermRef((t,e))),
+}
+
+pub Term: Box<Expr> = {
+    StringTerm,
+    NumTerm,
+    IdentTerm,
+    Array,
+    Map,
+    TermRef,
+    ParenExpr
+}
+ExprOp: Opcode = {
+    "+" => Opcode::Plus,
+};
+
+StringTerm: Box<Expr> = {
+  r#""[^"]*""# => Box::new(Expr::String(<>[1..<>.len()-1].to_string())),
+  r#"'[^']*'"# => Box::new(Expr::String(<>[1..<>.len()-1].to_string())),
+}
+
+IdentTerm: Box<Expr> = {
+  r"[[:alpha:]0-9_]*[[:alpha:]][[:alpha:]0-9_]*" => {
+    let ident = <>;
+    match ident {
+      "true" | "false" => Box::new(Expr::Bool(bool::from_str(ident).unwrap())),
+       _ => Box::new(Expr::Ident(<>.to_string())),
+    }
+  }
+}
+
+NumTerm: Box<Expr> = {
+  r"\d+" => Box::new(Expr::Num(i64::from_str(<>).unwrap())),
+}
