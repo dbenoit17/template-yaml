@@ -13,6 +13,7 @@ use ::std::collections::HashMap;
 use regex::Regex;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+pub type YamlMap = HashMap<String, YamlObject>;
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
@@ -27,7 +28,7 @@ pub enum Scalar {
 pub enum YamlObject {
     Scalar(Scalar),
     Array(Vec<YamlObject>),
-    Map(HashMap<String, YamlObject>),
+    Map(YamlMap),
 }
 
 macro_rules! yaml_unwrap_scalar {
@@ -43,10 +44,7 @@ macro_rules! yaml_unwrap_scalar {
     }};
 }
 
-pub fn eval_array(
-    arr: &Vec<Box<Expr>>,
-    env: &HashMap<String, YamlObject>,
-) -> Result<Vec<YamlObject>> {
+pub fn eval_array(arr: &Vec<Box<Expr>>, env: &YamlMap) -> Result<Vec<YamlObject>> {
     let mut yaml_array: Vec<YamlObject> = Vec::new();
     for sub_expr in arr.iter() {
         yaml_array.push(eval_expr(sub_expr, env)?);
@@ -54,11 +52,8 @@ pub fn eval_array(
     Ok(yaml_array)
 }
 
-pub fn eval_map(
-    map: &Vec<(Box<Expr>, Box<Expr>)>,
-    env: &HashMap<String, YamlObject>,
-) -> Result<HashMap<String, YamlObject>> {
-    let mut yaml_map: HashMap<String, YamlObject> = HashMap::new();
+pub fn eval_map(map: &Vec<(Box<Expr>, Box<Expr>)>, env: &YamlMap) -> Result<YamlMap> {
+    let mut yaml_map: YamlMap = HashMap::new();
     for sub_expr in map.iter() {
         let key = yaml_unwrap_scalar!(eval_expr(&sub_expr.0, env)?, String)?;
         yaml_map.insert(key, eval_expr(&sub_expr.1, env)?);
@@ -74,10 +69,7 @@ pub fn yaml_array_get_expr(array: &Vec<YamlObject>, index: &YamlObject) -> Resul
     Ok(array[*i as usize].clone())
 }
 
-pub fn yaml_map_get_expr(
-    map: &HashMap<String, YamlObject>,
-    key: &YamlObject,
-) -> Result<YamlObject> {
+pub fn yaml_map_get_expr(map: &YamlMap, key: &YamlObject) -> Result<YamlObject> {
     let k = yaml_unwrap_scalar!(key, String)?;
     if !map.contains_key(k) {
         return Err("key not found")?;
@@ -108,16 +100,14 @@ pub fn eval_binary_operands(
     expr0: &Expr,
     opcode: &Opcode,
     expr1: &Expr,
-    env: &HashMap<String, YamlObject>,
+    env: &YamlMap,
 ) -> Result<YamlObject> {
     let val0 = eval_expr(expr0, env)?;
     let val1 = eval_expr(expr1, env)?;
     let result = match opcode {
         Opcode::Plus => match val0 {
             YamlObject::Array(array0) => merge_yaml_objects!(Array, array0, val1, Vec<YamlObject>)?,
-            YamlObject::Map(map0) => {
-                merge_yaml_objects!(Map, map0, val1, HashMap<String, YamlObject>)?
-            }
+            YamlObject::Map(map0) => merge_yaml_objects!(Map, map0, val1, YamlMap)?,
             YamlObject::Scalar(scalar0) => match scalar0 {
                 Scalar::String(string0) => {
                     let string1 = yaml_unwrap_scalar!(val1, String)?;
@@ -137,7 +127,7 @@ pub fn eval_binary_operands(
     Ok(result)
 }
 
-pub fn eval_expr(expr: &Expr, env: &HashMap<String, YamlObject>) -> Result<YamlObject> {
+pub fn eval_expr(expr: &Expr, env: &YamlMap) -> Result<YamlObject> {
     let result = match expr {
         Expr::String(e) => YamlObject::Scalar(Scalar::String(e.to_string())),
         Expr::Num(e) => YamlObject::Scalar(Scalar::Number(*e)),
@@ -169,13 +159,13 @@ pub fn eval_expr(expr: &Expr, env: &HashMap<String, YamlObject>) -> Result<YamlO
     Ok(result)
 }
 
-pub fn evaluate_template(env: &HashMap<String, YamlObject>, string: &String) -> Result<YamlObject> {
+pub fn evaluate_template(env: &YamlMap, string: &String) -> Result<YamlObject> {
     let parser = template::ExprParser::new();
     let expr = parser.parse(string).unwrap();
     Ok(eval_expr(&expr, env)?)
 }
 
-pub fn expand_string(env: &HashMap<String, YamlObject>, string: &String) -> Result<YamlObject> {
+pub fn expand_string(env: &YamlMap, string: &String) -> Result<YamlObject> {
     let re = Regex::new(r"\{\{(.*)\}\}").unwrap();
     let shortest_match = re.shortest_match(string);
     let capture = match shortest_match {
@@ -214,21 +204,15 @@ pub fn expand_string(env: &HashMap<String, YamlObject>, string: &String) -> Resu
     Ok(result)
 }
 
-pub fn expand_map(
-    env: &HashMap<String, YamlObject>,
-    map: &HashMap<String, YamlObject>,
-) -> Result<YamlObject> {
-    let mut new_map: HashMap<String, YamlObject> = HashMap::new();
+pub fn expand_map(env: &YamlMap, map: &YamlMap) -> Result<YamlObject> {
+    let mut new_map: YamlMap = HashMap::new();
     for (k, v) in map {
         new_map.insert(k.to_string(), expand(env, v)?);
     }
     Ok(YamlObject::Map(new_map))
 }
 
-pub fn expand_array(
-    env: &HashMap<String, YamlObject>,
-    array: &Vec<YamlObject>,
-) -> Result<YamlObject> {
+pub fn expand_array(env: &YamlMap, array: &Vec<YamlObject>) -> Result<YamlObject> {
     let mut new_array: Vec<YamlObject> = Vec::new();
     for v in array.iter() {
         new_array.push(expand(env, v)?);
@@ -236,7 +220,7 @@ pub fn expand_array(
     Ok(YamlObject::Array(new_array))
 }
 
-pub fn expand(env: &HashMap<String, YamlObject>, yaml: &YamlObject) -> Result<YamlObject> {
+pub fn expand(env: &YamlMap, yaml: &YamlObject) -> Result<YamlObject> {
     let result = match yaml {
         YamlObject::Scalar(scalar) => match scalar {
             Scalar::String(string) => expand_string(env, string)?,
@@ -248,27 +232,26 @@ pub fn expand(env: &HashMap<String, YamlObject>, yaml: &YamlObject) -> Result<Ya
     Ok(result)
 }
 
-pub fn map_get_vars(obj: &YamlObject, vars_key: &str) -> Result<HashMap<String,YamlObject>> {
+pub fn map_get_vars(obj: &YamlObject, vars_key: &str) -> Result<YamlMap> {
     let vars = match &obj {
         YamlObject::Map(map) => {
             if map.contains_key(vars_key) {
                 match &map[vars_key] {
-                  YamlObject::Map(vars) => vars.clone(),
-                  _ => return Err("expected variable definitions to be of type Map")?,
+                    YamlObject::Map(vars) => vars.clone(),
+                    _ => return Err("expected variable definitions to be of type Map")?,
                 }
             } else {
                 HashMap::new()
             }
-        },
+        }
         _ => return Err("expected yaml map")?,
     };
     Ok(vars)
 }
 
 pub fn reserialize<T: serde::de::DeserializeOwned>(obj: &YamlObject) -> Result<T> {
-  Ok(serde_yaml::from_str(&serde_yaml::to_string(&obj)?)?)
+    Ok(serde_yaml::from_str(&serde_yaml::to_string(&obj)?)?)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -349,14 +332,14 @@ vars:
             let expr = parser.parse(test.0).unwrap();
             let evaluated_expr = eval_expr(&expr, &env);
             match evaluated_expr {
-              Ok(result) => {
-                eprintln!("{}", test.0);
-                eprintln!("{:?}\n", result);
-                assert_eq!(format!("{:?}", result), test.1);
-              },
-              Err(_) => {
-                assert_eq!("Error", test.1);
-              }
+                Ok(result) => {
+                    eprintln!("{}", test.0);
+                    eprintln!("{:?}\n", result);
+                    assert_eq!(format!("{:?}", result), test.1);
+                }
+                Err(_) => {
+                    assert_eq!("Error", test.1);
+                }
             }
         }
         Ok(())
