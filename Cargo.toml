@@ -1,7 +1,7 @@
 [package]
 name = "template_yaml"
 description = "A YAML templating engine"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 homepage = "https://github.com/dbenoit17/template-yaml"
 repository = "https://github.com/dbenoit17/template-yaml"
