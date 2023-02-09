@@ -1,2 +1,2 @@
 # template-yaml
-A yaml templating library for Rust
+A yaml templating engine for Rust
